@@ -3,20 +3,22 @@
 #   jupytext:
 #     text_representation:
 #       extension: .py
-#       format_name: percent
-#       format_version: '1.3'
-#       jupytext_version: 1.17.1
+#       format_name: light
+#       format_version: '1.5'
+#       jupytext_version: 1.16.7
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
 #     name: python3
 # ---
 
-# %% [markdown]
 # # Landsat SST utility functions
 # Author: Tasha Snow
 
-# %%
+# Note: After making changes to the `.ipynb` version of SSTutils, `File > Save notebook as`, 
+# change extension to `.py`, make executable in terminal with `chmod +x SSTutils.py`, and rerun `imports` cell.
+
+# +
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
@@ -80,7 +82,7 @@ from tqdm import tqdm
 from sklearn.preprocessing import RobustScaler
 from sklearn.preprocessing import StandardScaler
 
-# %% editable=true slideshow={"slide_type": ""}
+# + editable=true slideshow={"slide_type": ""}
 # Functions to search and open Lansat scenes
 '''
 Functions to search, open, and analyze Landsat scenes.
@@ -290,6 +292,57 @@ def search_stac(url, collection, gjson_outfile=None, bbox=None, timeRange=None, 
         items.save_object(gjson_outfile)
     
     return items
+
+###############
+
+def get_lst_mask(lstfile):
+    """
+    Generates an open ocean mask from a Landsat scene based on the QA band information.
+
+    This function searches for a Landsat scene using a provided filename, loads the 
+    'qa_pixel' band, applies cloud, ice, and ocean masking, and then extracts only 
+    the open ocean pixels. The output is a mask where open ocean pixels are 1, and 
+    all other pixels are NaN.
+
+    Parameters
+    ----------
+    lstfile : str
+        Path or name of the Landsat file used to derive the corresponding STAC search ID.
+
+    Returns
+    -------
+    numpy.ndarray
+        A 2D mask array where open ocean pixels are 1, and all other pixels are NaN.
+    """
+    filename = lstfile[:-11]
+    items = search_stac(url,collection,filename=filename)
+    
+    # Open stac catalog for some needed info
+    catalog = intake.open_stac_item_collection(items)
+    sceneid = items[0]
+    print(sceneid.id)
+    
+    scene = catalog[sceneid.id]
+    
+    # Open all desired bands for one scene
+    ls_scene0 = landsat_to_xarray(sceneid,catalog,bandNames=['qa_pixel'])
+    ls_scene0 = ls_scene0.rio.write_crs("epsg:3031", inplace=True)
+    
+    # Create a classification mask, applying cloud, ice, and ocean masks
+    ls_scene0 = create_masks(ls_scene0, cloud_mask=True, ice_mask=True, ocean_mask=True)
+    
+    # Initialize a mask array and set all pixels not classified as open ocean (mask != 3) to NaN
+    mask = np.ones(ls_scene0.shape[1:])
+    mask[ls_scene0.mask!=3] = np.nan
+
+    try:
+        del ls_scene0
+    except:
+        pass
+    
+    gc.collect()
+
+    return mask
 
 ##########################
 
@@ -593,8 +646,17 @@ def create_geotiff_dropdown(directory):
     
     interact(update_plot, selected_file=dropdown)
 
+##########################
 
-# %%
+# Preprocess to add time dimension and the file name to open_mfdataset for landsat using the filename
+def add_time_dim(ds):
+    lstr = ds.encoding["source"].split("LC0",1)[1]
+    times = pd.to_datetime(lstr[14:22]+lstr[38:44], format='%Y%m%d%H%M%S')
+    idee = ds.encoding["source"].split("/")[8][:-4] # The first number depends on how many subdirectories the file is in
+    return ds.assign_coords(time=times,ID=idee)
+
+
+# +
 # Atmospheric correction and production of SST
 '''
 Functions to find the matching MODIS water vapor image for atmospheric correction and production of SST.
@@ -1176,7 +1238,7 @@ def open_MODIS(ls_scene,scene,modout_path):
                 map_points = [(xi['Longitude'],xi['Latitude']) for xi in granule['umm']['SpatialExtent']['HorizontalSpatialDomain']['Geometry']['GPolygons'][num]['Boundary']['Points']]
                 pgon = Polygon(map_points)
                 percent_dif = lsatpoly.difference(pgon).area/lsatpoly.area
-                if percent_dif < 0.1:
+                if percent_dif == 0.0:
                     if crosses_idl(map_points):
                         print (f'A granule has a problematic polygon that likely crosses the International DateLine')
                     else:
@@ -1225,6 +1287,93 @@ def open_MODIS(ls_scene,scene,modout_path):
     return mod07,modfilenm
 
 ##########################
+    
+def find_MODIS(lonboundsC,latboundsC,ls_scene):
+    '''
+    Finds the MODIS SST scene most closely coincident to a Landsat scene
+    Uses full Landsat scene extent, not cropped
+    
+    Variables: 
+    ls_scene = xarray for one Landsat scene
+    
+    Outputs:
+    mod_scene = xarray of MODIS SST image coincident in time with the Landsat scene
+    granules[ind]['umm']['GranuleUR'] = modis file name
+    min_time = the time difference between the Landsat image acquisition and chosen MODIS image
+    
+    **not done, Differences from NLSST: 0.0 used as percent_dif requiring 100% overlap between MODIS and Landsat here since the subset area is so small
+    '''
+    
+    mbox = (lonboundsC[0],latboundsC[0],lonboundsC[1],latboundsC[1]) #east, south,west,north
+
+    # Construct a polygon to select a best fit MODIS image based on overlap
+    # Using the entire Landsat image
+    ls_scene_reproj = ls_scene.rio.reproject("EPSG:4326")
+    xmin,xmax,ymin,ymax = ls_scene_reproj.x.values[0],ls_scene_reproj.x.values[-1],ls_scene_reproj.y.values[0],ls_scene_reproj.y.values[-1]
+    lsatpoly = Polygon([(xmin,ymin),(xmin,ymax),(xmax,ymax),(xmax,ymin),(xmin,ymin)])
+    
+    # Get date/time for Landsat image and search for corresponding MODIS imagery  
+    ls_time = pd.to_datetime(ls_scene.time.values)
+    calc_dt = datetime.strptime(ls_time.strftime('%Y-%m-%d %H:%M:%S'), '%Y-%m-%d %H:%M:%S')
+    start_dt = (calc_dt + timedelta(days=-0.5)).strftime('%Y-%m-%d %H:%M:%S')
+    end_dt = (calc_dt + timedelta(days=0.5)).strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Gather all files from search location from Terra and Aqua for the same day as the Landsat image
+    granules = earthaccess.search_data(
+        short_name='MODIS_T-JPL-L2P-v2019.0',
+        bounding_box=mbox,
+        # Day of a landsat scene to day after - searches day of only
+        temporal=(start_dt,end_dt)
+    )
+    granules2 = earthaccess.search_data(
+        short_name='MODIS_A-JPL-L2P-v2019.0', #MODIS_AQUA_L3_SST_THERMAL_DAILY_4KM_NIGHTTIME_V2019.0
+        bounding_box=mbox,
+        # Day of a landsat scene to day after - searches day of only
+        temporal=(start_dt,end_dt)
+    )
+    granules = granules + granules2
+    print (f'{len(granules)} TOTAL MODIS granules')
+
+    # Accept only MODIS granules that overlap at least a perscribed amount with Landsat, in this case 100% => percent_dif=0.0
+    best_grans = []
+    for granule in granules:
+        try:
+            granule['umm']['SpatialExtent']['HorizontalSpatialDomain']['Geometry']['GPolygons']
+        except Exception as error:
+            print(error)
+            continue
+            # Would love to raise an exception for a valueerror except for GEOSError
+        for num in range(len(granule['umm']['SpatialExtent']['HorizontalSpatialDomain']['Geometry']['GPolygons'])):
+            try:
+                # Extract points, make into a polygon
+                map_points = [(xi['Longitude'],xi['Latitude']) for xi in granule['umm']['SpatialExtent']['HorizontalSpatialDomain']['Geometry']['GPolygons'][num]['Boundary']['Points']]
+                pgon = Polygon(map_points)
+                percent_dif = lsatpoly.difference(pgon).area/lsatpoly.area
+                # If the polygon covers the landsat area, check to make sure it doesn't cross the international date line with a messed up polygon (these are searched wrong in earthaccess so probably need adjustment there)
+                if percent_dif == 0.0:
+                    if crosses_idl(map_points):
+                        print (f'A granule has messed up polygon that likely crosses the International DateLine')
+                    else:
+                        best_grans.append(granule)
+                        continue
+            except Exception as error:
+                print(error)
+                # Would love to raise an exception for a valueerror except for GEOSError
+    print(f'{len(best_grans)} remaining MODIS granules')
+
+    # Find MODIS image closest in time to each Landsat image
+    # Make Landsat datetime timezone aware (UTC)
+    Mdates = [pd.to_datetime(granule['umm']['TemporalExtent']['RangeDateTime']['BeginningDateTime']) for granule in best_grans]
+    ind = Mdates.index(min( Mdates, key=lambda x: abs(x - pytz.utc.localize(ls_time))))
+    time_dif = abs(Mdates[ind] - pytz.utc.localize(pd.to_datetime(ls_time)))
+    print(f'Time difference between MODIS and Landsat: {time_dif}')
+
+    mod_scene = xr.open_dataset(earthaccess.open(best_grans[ind:ind+1])[0])
+    mod_scene = mod_scene.rio.write_crs("epsg:4326", inplace=True) 
+    
+    return mod_scene, granules[ind]['umm']['GranuleUR'],time_dif
+
+##########################  
 
 # Notes for changes - MODISlookup2 doesn't need to output lat/lon, but if want to do the check, 
 # can take the lat/lon check out of aligne and do it in 
@@ -1247,8 +1396,8 @@ def get_wv(ls_scene,mod07,spacing,param,scene,interp=0):
                               and resampled water vapor data from MODIS.
 
     Note:
-    This function is also used in LandsatCalibration; any changes here should consider potential impacts there 
-    - may need to be copied/generalized.
+    This function is also very similar to get_sst used in LandsatCalibration; any changes here should consider potential 
+    impacts there - may need to be copied/generalized.
 
     The function performs several key operations:
     1. Defines the bounding box for the Landsat scene based on its spatial coordinates.
@@ -1329,6 +1478,72 @@ def get_wv(ls_scene,mod07,spacing,param,scene,interp=0):
     WV_xr = WV_xr.rename({'longitude':'x','latitude':'y'})
     
     return WV_xr
+
+##########################  
+
+def get_sst(ls_scene,mod07,spacing,param):
+    '''
+    ***This is copied in LandsatCalibration, modifications have been made but some may tranfer
+    
+    Create MODIS files aligned and subsampled to Landsat
+    
+    Variables:
+    ls_scene = xarray dataset of a Landsat scene
+    mod07 = xarray datarray with MODIS L2 SST data
+    spacing = list of desired spatial resolution of output data from the alignment of MODIS to Landsat in y and x (e.g.,[300,-300])
+    param = string for desired dataset from MODIS file
+    
+    Output:
+    WV_xr = xarray dataarray of Landsat aligned and upsampled modis data from desired dataset
+    
+    Differences from NLSST: scene is not a parameter (used for test_gridcoords), SST gets extracted differently into data/lat/lon
+    
+    '''
+    # Read in desired variables and paths
+    
+    uniqWV = []
+
+    ULX = ls_scene.x[0] 
+    ULY = ls_scene.y[0]
+    LRX = ls_scene.x[-1]
+    LRY = ls_scene.y[-1] 
+    box = [ULX,LRX,ULY,LRY]
+    
+    #Extract desired datasets from MODIS file
+    if param == 'sea_surface_temperature': 
+        data = mod07[0,:,:]
+        lat, lon = mod07.lat, mod07.lon
+    else: 
+        data = mod07[param].values
+        lat, lon = mod07.Latitude, mod07.Longitude    
+
+    # Produce indicies for aligning MODIS pixel subset to match Landsat image at 4000m (or 300)resolution
+    indiciesMOD,lines,samples = MODISslookup(mod07,ls_scene,box,spacing)
+
+    # Align MODIS SST to Landsat on slightly upsampled grid # have the option to output `uniqImgWV` if want to know range of data
+    dataOutWV_xr = alignMODIS(data,lat,lon,param,indiciesMOD,lines,samples,mod07,ls_scene,spacing)
+
+    # Resample MODIS to Landsat resolution and interpolate with B-spline
+    # Output of shape fits and need to adjust x and y coords cuz are wrong
+    ups_factor = 30/spacing[0]
+    WV_upsample = pygmt.grdsample(grid=dataOutWV_xr, spacing=f'{ups_factor}k') # ,interpolation='b' if prefer to interpolate with bspline but don't think it is useful here
+
+    # Put into Xarray
+    latnew = ls_scene.y[:WV_upsample.shape[0]].values
+    lonnew = ls_scene.x[:WV_upsample.shape[1]].values
+    if dataOutWV_xr.latitude[0]!=latnew[0]:
+        print('Aligned y dim needs to start with the same coordinate as ls_scene')
+    if dataOutWV_xr.longitude[0]!=lonnew[0]:
+        print('Aligned x dim needs to start with the same coordinate as ls_scene')
+    
+    WV_xr = xr.DataArray(WV_upsample,name='SST',dims=["y","x"], coords={"latitude": (["y"],latnew), "longitude": (["x"],lonnew)})
+    WV_xr = WV_xr.rio.write_crs("epsg:3031", inplace=True)
+    WV_xr = WV_xr.rename({'longitude':'x','latitude':'y'})
+    WV_xr = WV_xr.set_index(x='x')
+    WV_xr = WV_xr.set_index(y='y')
+    
+    return WV_xr
+           
 
 ##########################
             
@@ -1487,6 +1702,104 @@ def MODISlookup(mod07,ls_scene,box,spacing,scene,interpgrid=None):
         
     return indiciesMOD,lines,samples,lat,lon
 
+##########################           
+
+def MODISsstlookup (mod07,ls_scene,box,spacing):
+    '''
+    Look up atmospheric consituents from MODIS product for each Landsat pixel
+    # Modified from http://stackoverflow.com/questions/2922532/obtain-latitude-and-longitude-from-a-geotiff-file 
+    # and Shane Grigsby
+
+    Variables:    
+    mod07 = xarray with MODIS data with crs 4326 assigned
+    ls_scene =  Landsat xarray DataArray
+    box = list with [left easting,right easting,top northing,bottom northing]
+    spacing = desired pixel size for extraction, list of [east/west, north/south] 
+          (recommend choosing a number that allows for fast calculations and even division by 30)
+
+    Output:
+    indiciesMOD = indicies used to project MODIS pixels to match Landsat pixels
+    lines = number of lines in Landsat file/MODIS output shape
+    samples = number of samples in Landsat file/MODIS output shape
+    x1,y1 = x and y coordinates for grid
+    
+    Differences from NLSST: lat/lon variables named differently in SST vs WV files, no interpolation,
+    test_gridcoords does not use `scene`, don't need to output lat/lon because do not interpolate and make 
+    new ones
+    
+    '''
+    test_threshold = 5 
+    
+    lat, lon = mod07.lat, mod07.lon # Different for SST vs WV
+    
+    # Test lat is in correct range
+    if ~((lat <= 90) & (lat >= -90)).all():
+        print('MODIS latitude not between -90 and 90')
+    # Test lon is in correct range
+    if ~((lon <= 180) & (lon >= -180)).all():
+        print('MODIS longitude not between -180 and 180')
+
+    # Get the existing coordinate system
+    old_cs = ls_scene.rio.crs # 'epsg:3031'
+    new_cs = mod07.rio.crs # 'epsg:4326'
+
+    # Create a transform object to convert between coordinate systems
+    inProj = Proj(init=old_cs)
+    outProj = Proj(init=new_cs)
+
+    # Parse coordinates and spacing to different variables
+    west,east,north,south = box
+    ewspace,nsspace = spacing
+
+    # Setting up grid, x coord from here to here at this spacing, mesh grid makes 2D
+    samples = len(np.r_[west:east+1:ewspace])
+    lines = len(np.r_[north:south-1:nsspace])#ns space is -300, could also do 30 instead of 300, but would just have duplicate pixels
+    if lines==0:
+        lines = len(np.r_[south:north-1:nsspace])
+        
+    # x1, y1 = np.meshgrid(np.r_[west:east:ewspace],np.r_[north:south:nsspace]) # offset by 1 meter to preserve shape
+    ewdnsamp = int(spacing[0]/30)
+    nsdnsamp = int(spacing[1]/30)
+
+    # Set up coarser sampling and check to make sure is in the same orientation as the original Landsat grid
+    xresamp = ls_scene.x.isel(x=slice(None, None, ewdnsamp)).values
+    if xresamp[0]!=ls_scene.x.values[0]:
+        xresamp = ls_scene.x.isel(x=slice(None, None, -ewdnsamp)).values
+        
+    yresamp = ls_scene.y.isel(y=slice(None, None, nsdnsamp)).values
+    if yresamp[0]!=ls_scene.y.values[0]:
+        yresamp = ls_scene.y.isel(y=slice(None, None, -nsdnsamp)).values
+
+    x1, y1 = np.meshgrid(xresamp,yresamp)
+    LScoords = np.vstack([x1.ravel(),y1.ravel()]).T
+    if (LScoords[0,0]!=ls_scene.x.values[0]) |  (LScoords[0,1]!=ls_scene.y.values[0]):
+        raise Exception('Landsat coordinates do not match expected during MODIS lookup')
+
+    # Ravel so ND can lookup easily
+    # Convert from LS map coords to lat lon --> x = lon, y = lat (usually?)
+    # Test that reprojection is working correctly on first and last grid point using round-trip transformation
+    xs1, ys1 =  transform(inProj,outProj,LScoords[0,0], LScoords[0,1], radians=True, always_xy=True)
+    xsl1, ysl1 =  transform(outProj,inProj,xs1, ys1, radians=True, always_xy=True)
+    if np.linalg.norm(np.array([xsl1, ysl1]) - LScoords[0,:]) > test_threshold:
+        print(f"Round-trip transformation error for point {LScoords[0,:]}, {np.linalg.norm(np.array([xsl1, ysl1]) - LScoords[0,:])}")
+    else:
+        # If passes, run on entire grid
+        xs, ys =  transform(inProj,outProj,LScoords[:,0], LScoords[:,1], radians=True, always_xy=True)
+
+    # Produce landsat reprojected to lat/lon and ensure lat is in 0 column
+    grid_coords = np.vstack([ys.ravel(),xs.ravel()]).T
+    # Test that lines and samples match grid_coords
+    if len(grid_coords) != lines*samples:
+        raise Exception(f'Size of grid coordinates do not match low resolution Landsat dims: {len(grid_coords)} vs. {lines*samples}. Check that spacing is negative for y')
+    MODIS_coords = np.vstack([lat.values.ravel(),lon.values.ravel()]).T
+    MODIS_coords *= np.pi / 180. # to radians
+    
+    # Build lookup, haversine = calc dist between lat,lon pairs so can do nearest neighbor on sphere - if did utm it would be planar
+    MOD_Ball = BallTree(MODIS_coords,metric='haversine') #sklearn library
+    distanceMOD, indiciesMOD= MOD_Ball.query(grid_coords, dualtree=True, breadth_first=True)
+        
+    return indiciesMOD,lines,samples
+
 ##########################
 
 def test_gridcoords(xs,ys,scene):
@@ -1533,7 +1846,68 @@ def test_gridcoords(xs,ys,scene):
 
 ##########################
 
+def test_gridcoords_calib(xs,ys):
+    '''
+    Test to ensure grid lat and lon are not swapped during reprojection and output grid coordinates
+    that have been raveled and stacked for input into BallTree. There is some uncertainty only when the image is
+    taken between -60 and -90 longitude because lat and lon can have the same values.
+    
+    Variables:
+    xs = 1D radians representing longitude 
+    ys = 1D radians representing latitude
+    
+    Output:
+    grid_coords = two columns of x/y radian pairs representing lon/lat
+    
+    Differences from NLSST: elif is different than NLSST pipeline
+    '''
+    
+    # Convert radians to lat/lon
+    x_check = xs * 180. / np.pi
+    y_check = ys * 180. / np.pi
+    
+    # We know lat is ys and lon is xs if this is true so goes in 0 column position to match MODIS
+    if ((-90 <= y_check) & (y_check <= -60)).all() & ~((-90 <= x_check) & (x_check <= -60)).all():
+        grid_coords = np.vstack([ys.ravel(),xs.ravel()]).T # note y / x switch (i.e., lat long convention)
+        print('Latitude in proper position')
+
+    # A small subset of data have lat and lon that falls between -60 and -90 so test if the landsat metadata confirms that
+    elif ((-90 <= y_check) & (y_check <= -60)).all():
+        # xs is latitude if not and goes in 0 column position
+        grid_coords = np.vstack([ys.ravel(),xs.ravel()]).T 
+        print('Latitude in uncertain position, may be incorrect')
+
+    # Otherwise xs is latitude and goes in 0 column position
+    else:
+        grid_coords = np.vstack([xs.ravel(),ys.ravel()]).T
+        print('Latitude in wrong position')
+    
+    return grid_coords
+
+##########################
+
 def alignMODIS(data,lat,lon,param,indiciesMOD,lines,samples,mod07,ls_scene,spacing):
+    '''
+    Align MODIS image to Landsat and resample at indicated spacing
+    
+    Variables:
+    data =
+    lat = 
+    lon = 
+    param =
+    indiciesMOD =
+    lines = 
+    samples =
+    mod07 = 
+    ls_scene =
+    spacing =
+    
+    Output:
+    dataOut_xr = 
+    
+    Not currently set, but can also output: 
+    uniqImg = uniq MODIS atm values within area of Landsat image
+    '''
     test_threshold = 5
     
     # Check to ensure lat/lon and data have compatible shapes
@@ -1566,15 +1940,32 @@ def alignMODIS(data,lat,lon,param,indiciesMOD,lines,samples,mod07,ls_scene,spaci
     redy = int(abs(spacing[0]/30))
     redx = int(abs(spacing[1]/30))
 
-    # Set up coarser sampling and check to make sure is in the same orientation as the original Landsat grid
-    xgrid = ls_scene.x.isel(x=slice(None, None, redx)).values
+    # From SST# Set up coarser sampling and check to make sure is in the same orientation as the original Landsat grid
+    # xgrid = ls_scene.x.isel(x=slice(None, None, redx)).values
+    # if xgrid[0]!=ls_scene.x.values[0]:
+    #     xgrid = ls_scene.x.isel(x=slice(None, None, -redx)).values
+    # ygrid = ls_scene.y.isel(y=slice(None, None, redy)).values
+    # if ygrid[0]!=ls_scene.y.values[0]:
+    #     ygrid = ls_scene.y.isel(y=slice(None, None, -redy)).values
+    # if (xgrid[0]!=ls_scene.x.values[0]) |  (ygrid[0]!=ls_scene.y.values[0]):
+    #     raise Exception('Landsat coordinates do not match expected during MODIS lookup')
+
+    #From LandsatCalib
+    # Set up coarser sampling grid to match spacing and check to make sure is in the same orientation as the original Landsat grid
+    xgrid = ls_scene.x.values[0::red_x]
+    if len(xgrid)==1:
+        xgrid = ls_scene.x.values[0::-red_x]
     if xgrid[0]!=ls_scene.x.values[0]:
-        xgrid = ls_scene.x.isel(x=slice(None, None, -redx)).values
-    ygrid = ls_scene.y.isel(y=slice(None, None, redy)).values
+        xgrid = np.flip(xgrid)
+        print ('Align x flip')
+    ygrid = ls_scene.y.values[0::red_y]
+    if len(ygrid)==1:
+        ygrid = ls_scene.y.values[0::-red_y]
     if ygrid[0]!=ls_scene.y.values[0]:
-        ygrid = ls_scene.y.isel(y=slice(None, None, -redy)).values
+        ygrid = np.flip(ygrid)
+        print ('Align y flip')
     if (xgrid[0]!=ls_scene.x.values[0]) |  (ygrid[0]!=ls_scene.y.values[0]):
-        raise Exception('Landsat coordinates do not match expected during MODIS lookup')
+        raise Exception(f'Landsat coordinates do not match expected during MODIS align')
     
     # Create xarray from numpy array
     dataOut_xr = xr.DataArray(dataOut,name='SST',dims=["y","x"], coords={"latitude": (["y"],ygrid), "longitude": (["x"],xgrid)})
@@ -1604,13 +1995,14 @@ def uniqueMODIS(data,param,indiciesMOD,lines,samples):
     # Convert from K to C
     KtoC = -273.15
     
-    # Reproject data from MODIS into corresponding postions for Landsat pixels for water vapor and ozone
+    # Reproject data from MODIS into corresponding postions for Landsat pixels for the desired dataset
+    # Remove unrealistic data/outliers
     # Scaling has already been automatically done by xarray
-    if param == 'sst':
-        dataOut = np.reshape(np.array(data.ravel())[indiciesMOD],(lines,samples))#* # to scale?
-        dataOut[dataOut < -3] = np.nan
-        MODimg = np.array(data)
-        MODimg[MODimg < 0] = np.nan
+    if param == 'sea_surface_temperature':  
+        #Extract desired datasets from MODIS file from lookup key
+        # Move to adjusted grid and rescale data
+        dataOut = np.reshape(np.array(data.values.ravel())[indiciesMOD],(lines,samples)) + KtoC #* # to scale?
+        dataOut[dataOut < -3.5] = np.nan
     elif param == 'Water_Vapor':
         dataOut = np.reshape(np.array(data.ravel())[indiciesMOD],(lines,samples))
         dataOut[dataOut < 0] = np.nan
@@ -1630,13 +2022,22 @@ def uniqueMODIS(data,param,indiciesMOD,lines,samples):
     return dataOut,uniq # Can also output MODimg and inverse and counts if desired
 
 
-# %%
+# +
 # Functions for deriving SST retrieval coefficients
 '''
 These functions help to derive the SST monthly correction coefficients
 prep_retrieval prepares the inputs for running the multiple regression that determines the coefficients, including
 converting ERA-5 specific humidity data to total column water vapor in spec_hu_to_tcwv. Derive retrieval then takes
 the inputs and runs an OLS multiple regression to derive the coefficients.
+
+Functions to search, open, and analyze Landsat scenes.
+Search_stac finds the Landsat scene based on user parameters, 
+plot_search plots the locations of the landsat scenes from the search,
+landsat_to_xarray takes one of those scenes and puts all bands into an xarray,
+and create_masks produces cloud/ice/water masks for the scene. Subset_img 
+subsets a landsat scene with coordinates that have been reprojected from lat/lon
+and may be flipped in which is larger in the pair. Lsat_reproj can be used to reproject
+while ensuring x and y pairs don't get flipped (common converting between espg 3031 and wgs84.
 '''
 def prep_retrieval(atmpath,prefix,spec_hu_file):
     '''
@@ -1964,7 +2365,7 @@ def spec_hu_to_tcwv(modtran_lut, modtran_atm, atm_levels=37):
     return modtran_lut
 
 
-# %%
+# +
 # Functions to produce SST with atmospheric correction
 '''
 Functions to produce SST with atmospheric correction
