@@ -31,7 +31,7 @@ This repository provides a modular and cloud-ready pipeline for generating atmos
    - **Generates:** Uncalibrated SST Cloud-Optimized Geotiff files for each Landsat scene used, validation matchups recorded in `Data/Landsat_validation_201309_201403_1.0.csv`
 
 5. **Build a Time Series**  
-   - **`landsat_timeseries.ipynb`**  
+   - **`SSTtimeseries.ipynb`**  
      Aggregates SST, MODIS, and Landsat ST products over time and evaluates comparative performance.
 
 ## 📂 Repository Structure
