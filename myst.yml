@@ -15,12 +15,14 @@ project:
   toc:
     - file: intro.md
     - file: SSTpipeline.ipynb
-    - file: SSTcrosscalibration.ipynb
+    - file: LandsatCalibration.ipynb
     - file: SSTvalidation.ipynb
+    - file: landsat_timeseries.ipynb
     - file: appendix.md
           children:
             - file: ERADownload.ipynb
             - file: MODTRAN4_prep.ipynb
+            - file: SSTutils.ipynb
 
 site:
   template: book-theme
