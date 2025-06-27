@@ -17,7 +17,7 @@ project:
     - file: SSTpipeline.ipynb
     - file: LandsatCalibration.ipynb
     - file: SSTvalidation.ipynb
-    - file: landsat_timeseries.ipynb
+    - file: SSTtimeseries.ipynb
     - file: appendix.md
       children:
         - file: ERADownload.ipynb
