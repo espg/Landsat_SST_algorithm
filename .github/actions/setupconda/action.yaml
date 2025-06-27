@@ -9,9 +9,9 @@ runs:
               # Increase this value to reset cache if ./conda/conda-lock.yml has not changed
               CACHE_NUMBER: 0
           with:
-              environment-file: ./conda-lock.yml
+              environment-file: ./conda/conda-lock.yml
               environment-name: landsat_sst
               # only cache environment
               cache-environment: true
               cache-downloads: false
-              cache-environment-key: ${{ runner.os }}-conda-environment-${{ env.CACHE_NUMBER }}-${{ hashFiles('./conda-lock.yml') }}
+              cache-environment-key: ${{ runner.os }}-conda-environment-${{ env.CACHE_NUMBER }}-${{ hashFiles('./conda/conda-lock.yml') }}
