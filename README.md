@@ -61,8 +61,8 @@ This repository provides a modular and cloud-ready pipeline for generating **atm
 This project requires a number of Python libraries. Install all dependencies with the provided Conda environment:
 
 ```bash
-conda env create -f environment.yml
-conda activate landsat_sst
+mamba env create -f environment.yml
+conda activate sst
 ```
 
 ## ☁️ Cloud-Ready Design
