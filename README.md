@@ -1,6 +1,6 @@
 # Landsat SST Algorithm
 
-This repository provides a modular and cloud-ready pipeline for generating **atmospherically corrected sea surface temperatures (SST)** from Landsat thermal infrared imagery using an approach tailored to high-latitude applications, currently only validated in West Antarctica at the moment. The pipeline includes tools for atmospheric correction, cross-calibration against MODIS SST, time series generation, and validation with in situ observations.
+This repository provides a modular and cloud-ready pipeline for generating atmospherically corrected sea surface temperatures (SST) from Landsat thermal infrared imagery using an approach tailored to high-latitude applications, currently only validated in West Antarctica at the moment. The pipeline includes tools for atmospheric correction, cross-calibration against MODIS SST, time series generation, and validation with in situ observations.
 
 ## 🔁 Workflow Overview
 
