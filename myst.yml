@@ -13,7 +13,7 @@ project:
   # To autogenerate a Table of Contents, run "jupyter book init --write-toc"
 
   toc:
-    - file: intro.md
+    - file: README.md
     - file: SSTpipeline.ipynb
     - file: LandsatCalibration.ipynb
     - file: SSTvalidation.ipynb
