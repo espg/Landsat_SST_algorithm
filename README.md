@@ -61,7 +61,7 @@ This repository provides a modular and cloud-ready pipeline for generating atmos
 This project requires a number of Python libraries. Install all dependencies with the provided Conda environment:
 
 ```bash
-mamba env create -f environment.yml
+mamba env create -f conda/environment.yml
 conda activate sst
 ```
 
