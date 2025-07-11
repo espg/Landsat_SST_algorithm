@@ -91,7 +91,6 @@ View the full license in the [LICENSE](./LICENSE) file.
 ## 📫 Contact
 
 **Tasha Snow, PhD**  
-Earth System Science Interdisciplinary Center (ESSIC)  
-University of Maryland
-NASA Goddard Space Flight Center  
+Earth System Science Interdisciplinary Center (ESSIC), University of Maryland \
+NASA Goddard Space Flight Center  \
 📧 [tsnow03@umd.edu](mailto:tsnow03@umd.edu)
