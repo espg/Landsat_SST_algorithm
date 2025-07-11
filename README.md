@@ -21,13 +21,15 @@ This repository provides a modular and cloud-ready pipeline for generating atmos
 3. **Cross-Calibrate Against MODIS SST**  
    - **`LandsatCalibration.ipynb`**  
      Builds matchups between Landsat SST or Landsat Surface Temperature (ST) and MODIS SST to build calibration relationships using Orthogonal Distance Regression (ODR).
-   - **External Inputs:** Uncalibrated SST Cloud-Optimized Geotiffs produced by `SSTpipeline.ipynb` or downloaded from [doi: 10.21227/4ttz-p423](https://dx.doi.org/10.21227/4ttz-p423) as well as      LST Geotiffs only available at that DOI.
+   - **External Inputs:** Uncalibrated SST Cloud-Optimized Geotiffs produced by `SSTpipeline.ipynb` or downloaded from [doi: 10.21227/4ttz-p423](https://dx.doi.org/10.21227/4ttz-p423) as well as LST Geotiffs only available at that DOI.
+   - **Relies on:** functions in `SSTutils.py`
    - **Generates:** SST-MODIS and LST-MODIS matchups for each sampling region (e.g., `Data/MODISvLandsat_LST_Burke.csv` and `Data/MODISvLandsat_SST_Burke.csv`), and regression models used to        correct both SST and ST products.
 
 4. **Validate Against In Situ Buoy Data**  
    - **`SSTvalidation.ipynb`**  
      Compares Landsat SST to Argo buoy measurements (e.g., from iQuam) for independent validation.
    - **External Inputs:** iQuam files available for download at [doi: 10.21227/4ttz-p423](https://dx.doi.org/10.21227/4ttz-p423)
+   - **Relies on:** functions in `SSTutils.py`
    - **Generates:** Uncalibrated SST Cloud-Optimized Geotiff files for each Landsat scene used, validation matchups recorded in `Data/Landsat_validation_201309_201403_1.0.csv`
 
 5. **Build a Time Series**  
