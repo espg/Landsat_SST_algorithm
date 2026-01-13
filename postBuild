@@ -29,7 +29,9 @@ else
     cd "libRadtran-${LIBRADTRAN_VERSION}"
 
     # Clean out stale Makefiles with hardcoded macOS paths from source tarball
-    make distclean || true
+    # The tarball has pre-generated Makefiles with /opt/local paths baked in
+    find . -name "Makefile" -delete
+    find . -name "config.cache" -delete
 
     # Configure and build
     # Explicitly set paths to avoid finding system libraries
