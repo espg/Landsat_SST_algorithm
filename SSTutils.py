@@ -64,6 +64,7 @@ from rasterio.warp import reproject
 from rasterio.warp import Resampling as resample
 import cartopy.crs as ccrs
 import cartopy
+import cartopy.feature as cfeature
 from pykrige.ok import OrdinaryKriging
 from sklearn.linear_model import LinearRegression, RANSACRegressor
 from scipy.odr import Model, RealData, ODR
@@ -318,19 +319,23 @@ def search_stac(url, collection, gjson_outfile=None, bbox=None, timeRange=None, 
 
 ###############
 
-def get_lst_mask(lstfile):
+def get_lst_mask(lstfile, url='https://landsatlook.usgs.gov/stac-server', collection='landsat-c2l1'):
     """
     Generates an open ocean mask from a Landsat scene based on the QA band information.
 
-    This function searches for a Landsat scene using a provided filename, loads the 
-    'qa_pixel' band, applies cloud, ice, and ocean masking, and then extracts only 
-    the open ocean pixels. The output is a mask where open ocean pixels are 1, and 
+    This function searches for a Landsat scene using a provided filename, loads the
+    'qa_pixel' band, applies cloud, ice, and ocean masking, and then extracts only
+    the open ocean pixels. The output is a mask where open ocean pixels are 1, and
     all other pixels are NaN.
 
     Parameters
     ----------
     lstfile : str
         Path or name of the Landsat file used to derive the corresponding STAC search ID.
+    url : str, optional
+        URL to the STAC API. Default is USGS Landsat STAC server.
+    collection : str, optional
+        Collection name. Default is 'landsat-c2l1'.
 
     Returns
     -------
@@ -338,7 +343,7 @@ def get_lst_mask(lstfile):
         A 2D mask array where open ocean pixels are 1, and all other pixels are NaN.
     """
     filename = lstfile[:-11]
-    items = search_stac(url,collection,filename=filename)
+    items = search_stac(url, collection, filename=filename)
     
     # Open stac catalog for some needed info
     catalog = intake.open_stac_item_collection(items)
@@ -1541,7 +1546,7 @@ def get_sst(ls_scene,mod07,spacing,param):
         lat, lon = mod07.Latitude, mod07.Longitude    
 
     # Produce indicies for aligning MODIS pixel subset to match Landsat image at 4000m (or 300)resolution
-    indiciesMOD,lines,samples = MODISslookup(mod07,ls_scene,box,spacing)
+    indiciesMOD,lines,samples = MODISsstlookup(mod07,ls_scene,box,spacing)
 
     # Align MODIS SST to Landsat on slightly upsampled grid # have the option to output `uniqImgWV` if want to know range of data
     dataOutWV_xr = alignMODIS(data,lat,lon,param,indiciesMOD,lines,samples,mod07,ls_scene,spacing)
@@ -1957,7 +1962,7 @@ def alignMODIS(data,lat,lon,param,indiciesMOD,lines,samples,mod07,ls_scene,spaci
     xsl1, ysl1 = transformer_test.transform(xs1, ys1)
     for i,n in enumerate(xsl1):
         if np.linalg.norm(np.array([xsl1[i], ysl1[i]]) - [xx[i],yy[i]]) > test_threshold:
-            print(f"Round-trip transformation error for {sceneid}, {np.linalg.norm(np.array([xsl1[i], ysl1[i]]) - xx[i],yy[i])}")
+            print(f"Round-trip transformation error: {np.linalg.norm(np.array([xsl1[i], ysl1[i]]) - [xx[i],yy[i]])}")
     
     # Spacing to create x and y parameters at the correct spacing
     redy = int(abs(spacing[0]/30))
@@ -1975,15 +1980,15 @@ def alignMODIS(data,lat,lon,param,indiciesMOD,lines,samples,mod07,ls_scene,spaci
 
     #From LandsatCalib
     # Set up coarser sampling grid to match spacing and check to make sure is in the same orientation as the original Landsat grid
-    xgrid = ls_scene.x.values[0::red_x]
+    xgrid = ls_scene.x.values[0::redx]
     if len(xgrid)==1:
-        xgrid = ls_scene.x.values[0::-red_x]
+        xgrid = ls_scene.x.values[0::-redx]
     if xgrid[0]!=ls_scene.x.values[0]:
         xgrid = np.flip(xgrid)
         print ('Align x flip')
-    ygrid = ls_scene.y.values[0::red_y]
+    ygrid = ls_scene.y.values[0::redy]
     if len(ygrid)==1:
-        ygrid = ls_scene.y.values[0::-red_y]
+        ygrid = ls_scene.y.values[0::-redy]
     if ygrid[0]!=ls_scene.y.values[0]:
         ygrid = np.flip(ygrid)
         print ('Align y flip')
@@ -2578,6 +2583,6 @@ def apply_retrieval(ls_thermal,scene,mask,WV_xr,atmcor,simT_transformer,simTOA_t
 
         return SST
         
-    except Exception as e: 
+    except Exception as e:
         print(e)
-        print (f'atm correction of {ls_scene.id.values} failed')
+        print (f'atm correction of {scene.id} failed')
