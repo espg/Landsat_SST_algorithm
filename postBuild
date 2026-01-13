@@ -37,9 +37,8 @@ else
     find . -type d -name ".deps" -exec rm -rf {} + 2>/dev/null || true
     find . -name "*.Po" -delete
     find . -name "*.Plo" -delete
-
-    # Replace any hardcoded /opt/local paths in Makefile.in files
-    find . -name "Makefile.in" -exec sed -i 's|/opt/local|'"${CONDA_PREFIX}"'|g' {} \;
+    # THIS IS THE KEY ONE - .depend files have hardcoded paths
+    find . -name ".depend" -delete
 
     # Configure and build
     # Explicitly set paths to avoid finding system libraries
