@@ -5,45 +5,72 @@ set -e
 
 # Configuration
 LIBRADTRAN_VERSION="2.0.6"
-LIBRADTRAN_DIR="${HOME}/libradtran"
+LIBRADTRAN_DIR="${LIBRADTRAN_DIR:-${HOME}/libradtran}"  # Use env var if set, else default
 REPTRAN_URL="http://www.meteo.physik.uni-muenchen.de/~libradtran/lib/exe/fetch.php?media=download:reptran_2024_all.tar.gz"
 
-echo "=== Building LibRadTran ${LIBRADTRAN_VERSION} ==="
+# Check if LibRadTran is already installed (for local testing)
+if [ -x "${LIBRADTRAN_DIR}/bin/uvspec" ]; then
+    echo "LibRadTran already installed at ${LIBRADTRAN_DIR}"
+    echo "Skipping build, checking REPTRAN data..."
+else
+    # Find conda prefix (works for both local conda and Binder)
+    if [ -z "${CONDA_PREFIX}" ]; then
+        # Try to find conda from PATH
+        CONDA_PREFIX=$(dirname $(dirname $(which python)))
+    fi
 
-# Download and extract LibRadTran
-cd /tmp
-wget -q "http://www.libradtran.org/download/libRadtran-${LIBRADTRAN_VERSION}.tar.gz"
-tar -xzf "libRadtran-${LIBRADTRAN_VERSION}.tar.gz"
-cd "libRadtran-${LIBRADTRAN_VERSION}"
+    echo "=== Building LibRadTran ${LIBRADTRAN_VERSION} ==="
+    echo "Using CONDA_PREFIX: ${CONDA_PREFIX}"
 
-# Configure and build
-# Use conda environment paths for GSL and NetCDF
-./configure --prefix="${LIBRADTRAN_DIR}" \
-    CPPFLAGS="-I${CONDA_PREFIX}/include" \
-    LDFLAGS="-L${CONDA_PREFIX}/lib"
+    # Download and extract LibRadTran
+    cd /tmp
+    wget -q "http://www.libradtran.org/download/libRadtran-${LIBRADTRAN_VERSION}.tar.gz"
+    tar -xzf "libRadtran-${LIBRADTRAN_VERSION}.tar.gz"
+    cd "libRadtran-${LIBRADTRAN_VERSION}"
 
-make -j$(nproc)
-make install
+    # Configure and build
+    # Explicitly set paths to avoid finding system libraries
+    export CPPFLAGS="-I${CONDA_PREFIX}/include"
+    export LDFLAGS="-L${CONDA_PREFIX}/lib"
+    export CFLAGS="-I${CONDA_PREFIX}/include"
+    export PKG_CONFIG_PATH="${CONDA_PREFIX}/lib/pkgconfig"
 
-echo "=== Downloading REPTRAN 2024 data ==="
+    ./configure --prefix="${LIBRADTRAN_DIR}" \
+        --with-gsl="${CONDA_PREFIX}"
 
-# Download REPTRAN 2024 data (includes thermal lookup tables for medium/fine resolution)
-cd "${LIBRADTRAN_DIR}/share/libRadtran/data/correlated_k/reptran"
-wget -q -O reptran_2024_all.tar.gz "${REPTRAN_URL}"
-tar -xzf reptran_2024_all.tar.gz
-rm reptran_2024_all.tar.gz
+    make -j$(nproc)
+    make install
+
+    # Cleanup build files
+    rm -rf /tmp/libRadtran-*
+fi
+
+echo "=== Checking REPTRAN 2024 data ==="
+
+# Download REPTRAN 2024 data if thermal lookup files are missing
+REPTRAN_DIR="${LIBRADTRAN_DIR}/share/libRadtran/data/correlated_k/reptran"
+if [ ! -f "${REPTRAN_DIR}/reptran_thermal_fine.lookup.h2o.cdf" ]; then
+    echo "Downloading REPTRAN 2024 thermal lookup tables..."
+    cd "${REPTRAN_DIR}"
+    wget -q -O reptran_2024_all.tar.gz "${REPTRAN_URL}"
+    tar -xzf reptran_2024_all.tar.gz
+    rm reptran_2024_all.tar.gz
+else
+    echo "REPTRAN 2024 thermal data already present"
+fi
 
 echo "=== Setting environment variables ==="
 
 # Set environment variable for runtime
-echo "export LIBRADTRAN_DIR=${LIBRADTRAN_DIR}" >> ~/.bashrc
+if ! grep -q "LIBRADTRAN_DIR" ~/.bashrc 2>/dev/null; then
+    echo "export LIBRADTRAN_DIR=${LIBRADTRAN_DIR}" >> ~/.bashrc
+fi
 
-# Also create activation script for conda environment
-mkdir -p "${CONDA_PREFIX}/etc/conda/activate.d"
-echo "export LIBRADTRAN_DIR=${LIBRADTRAN_DIR}" > "${CONDA_PREFIX}/etc/conda/activate.d/libradtran.sh"
-
-# Cleanup
-rm -rf /tmp/libRadtran-*
+# Also create activation script for conda environment if CONDA_PREFIX is set
+if [ -n "${CONDA_PREFIX}" ]; then
+    mkdir -p "${CONDA_PREFIX}/etc/conda/activate.d"
+    echo "export LIBRADTRAN_DIR=${LIBRADTRAN_DIR}" > "${CONDA_PREFIX}/etc/conda/activate.d/libradtran.sh"
+fi
 
 echo "=== LibRadTran installation complete ==="
 echo "LIBRADTRAN_DIR=${LIBRADTRAN_DIR}"
