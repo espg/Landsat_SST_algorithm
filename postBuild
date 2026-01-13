@@ -28,6 +28,9 @@ else
     tar -xzf "libRadtran-${LIBRADTRAN_VERSION}.tar.gz"
     cd "libRadtran-${LIBRADTRAN_VERSION}"
 
+    # Clean out stale Makefiles with hardcoded macOS paths from source tarball
+    make distclean || true
+
     # Configure and build
     # Explicitly set paths to avoid finding system libraries
     export CPPFLAGS="-I${CONDA_PREFIX}/include"
@@ -36,7 +39,8 @@ else
     export PKG_CONFIG_PATH="${CONDA_PREFIX}/lib/pkgconfig"
 
     ./configure --prefix="${LIBRADTRAN_DIR}" \
-        --with-gsl="${CONDA_PREFIX}"
+        --with-gsl="${CONDA_PREFIX}" \
+        --with-netcdf="${CONDA_PREFIX}"
 
     make -j$(nproc)
     make install
