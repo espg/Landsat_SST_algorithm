@@ -28,10 +28,18 @@ else
     tar -xzf "libRadtran-${LIBRADTRAN_VERSION}.tar.gz"
     cd "libRadtran-${LIBRADTRAN_VERSION}"
 
-    # Clean out stale Makefiles with hardcoded macOS paths from source tarball
-    # The tarball has pre-generated Makefiles with /opt/local paths baked in
+    # Clean out ALL autoconf artifacts with hardcoded macOS paths from source tarball
+    # The tarball has pre-generated files with /opt/local paths baked in
     find . -name "Makefile" -delete
     find . -name "config.cache" -delete
+    find . -name "config.status" -delete
+    find . -name "config.log" -delete
+    find . -type d -name ".deps" -exec rm -rf {} + 2>/dev/null || true
+    find . -name "*.Po" -delete
+    find . -name "*.Plo" -delete
+
+    # Replace any hardcoded /opt/local paths in Makefile.in files
+    find . -name "Makefile.in" -exec sed -i 's|/opt/local|'"${CONDA_PREFIX}"'|g' {} \;
 
     # Configure and build
     # Explicitly set paths to avoid finding system libraries
