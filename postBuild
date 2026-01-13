@@ -1,0 +1,49 @@
+#!/bin/bash
+# postBuild script for Binder
+# Compiles LibRadTran and downloads REPTRAN 2024 thermal lookup data
+set -e
+
+# Configuration
+LIBRADTRAN_VERSION="2.0.6"
+LIBRADTRAN_DIR="${HOME}/libradtran"
+REPTRAN_URL="http://www.meteo.physik.uni-muenchen.de/~libradtran/lib/exe/fetch.php?media=download:reptran_2024_all.tar.gz"
+
+echo "=== Building LibRadTran ${LIBRADTRAN_VERSION} ==="
+
+# Download and extract LibRadTran
+cd /tmp
+wget -q "http://www.libradtran.org/download/libRadtran-${LIBRADTRAN_VERSION}.tar.gz"
+tar -xzf "libRadtran-${LIBRADTRAN_VERSION}.tar.gz"
+cd "libRadtran-${LIBRADTRAN_VERSION}"
+
+# Configure and build
+# Use conda environment paths for GSL and NetCDF
+./configure --prefix="${LIBRADTRAN_DIR}" \
+    CPPFLAGS="-I${CONDA_PREFIX}/include" \
+    LDFLAGS="-L${CONDA_PREFIX}/lib"
+
+make -j$(nproc)
+make install
+
+echo "=== Downloading REPTRAN 2024 data ==="
+
+# Download REPTRAN 2024 data (includes thermal lookup tables for medium/fine resolution)
+cd "${LIBRADTRAN_DIR}/share/libRadtran/data/correlated_k/reptran"
+wget -q -O reptran_2024_all.tar.gz "${REPTRAN_URL}"
+tar -xzf reptran_2024_all.tar.gz
+rm reptran_2024_all.tar.gz
+
+echo "=== Setting environment variables ==="
+
+# Set environment variable for runtime
+echo "export LIBRADTRAN_DIR=${LIBRADTRAN_DIR}" >> ~/.bashrc
+
+# Also create activation script for conda environment
+mkdir -p "${CONDA_PREFIX}/etc/conda/activate.d"
+echo "export LIBRADTRAN_DIR=${LIBRADTRAN_DIR}" > "${CONDA_PREFIX}/etc/conda/activate.d/libradtran.sh"
+
+# Cleanup
+rm -rf /tmp/libRadtran-*
+
+echo "=== LibRadTran installation complete ==="
+echo "LIBRADTRAN_DIR=${LIBRADTRAN_DIR}"

@@ -10,7 +10,7 @@ dependencies:
   - jupyterlab
   # pip to install package that's only available in pip
   - pip
-  
+
   - xarray
   - pygmt
   - scikit-image
@@ -39,7 +39,15 @@ dependencies:
   - ipympl
   - geoviews
   - hvplot
+
+  # LibRadTran build dependencies
+  - gsl
+  - netcdf4
+  - c-compiler
+  - fortran-compiler
+  - make
+  - wget
+
   - pip:
     - pytensor
-  - pip:
     - pymc

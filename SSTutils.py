@@ -82,6 +82,29 @@ from tqdm import tqdm
 from sklearn.preprocessing import RobustScaler
 from sklearn.preprocessing import StandardScaler
 
+# --------------------------
+# RTM Backend Configuration
+# --------------------------
+# Set RTM_BACKEND to 'modtran' or 'libradtran' to select the radiative transfer model
+# for atmospheric correction. LibRadTran is an open-source alternative that doesn't
+# require a MODTRAN license.
+#
+# To use LibRadTran:
+# 1. Install LibRadTran and set LIBRADTRAN_DIR environment variable
+# 2. Run generate_libradtran_lut.py to create LUT files
+# 3. Set RTM_BACKEND = 'libradtran' below
+#
+RTM_BACKEND = 'modtran'  # Options: 'modtran', 'libradtran'
+
+def get_rtm_file_prefix(backend=None):
+    """Get the file prefix for RTM output files based on backend selection."""
+    if backend is None:
+        backend = RTM_BACKEND
+    if backend == 'libradtran':
+        return 'libradtran_atmprofiles_'
+    else:
+        return 'modtran_atmprofiles_'
+
 # + editable=true slideshow={"slide_type": ""}
 # Functions to search and open Lansat scenes
 '''
@@ -2097,21 +2120,40 @@ def prep_retrieval(atmpath,prefix,spec_hu_file):
 
 ##########################
 
-def concat_modtran_months(months,atmpath):
+def concat_modtran_months(months, atmpath, rtm_backend=None):
+    """
+    Load and concatenate RTM outputs for multiple months.
+
+    Parameters
+    ----------
+    months : list of str
+        List of month strings (e.g., ['01', '02', '03'])
+    atmpath : Path
+        Path to AtmCorrection data directory
+    rtm_backend : str, optional
+        RTM backend to use ('modtran' or 'libradtran').
+        If None, uses the global RTM_BACKEND setting.
+    """
     # Create a list to store the DataFrame for each month in the window.
     modtran_list = []
 
     n = 0
-    
+
+    # Get file prefix based on backend
+    file_prefix = get_rtm_file_prefix(rtm_backend)
+
     for mo in months:
-        TCWV_input_file = atmpath / f"TCWV_{mo}.csv"
+        # Use backend-specific TCWV cache file
+        backend_suffix = '' if (rtm_backend is None or rtm_backend == 'modtran') else f'_{rtm_backend}'
+        TCWV_input_file = atmpath / f"TCWV_{mo}{backend_suffix}.csv"
+
         if os.path.isfile(TCWV_input_file):
             # print(f"  Month {mo}: retrieval input exists")
             modtran = pd.read_csv(TCWV_input_file)
         else:
-            spec_hu_file = f"modtran_atmprofiles_{mo}.txt"
-            modtran_output_file = f"modtran_atmprofiles_{mo}.bts+tau+dbtdsst.txt"
-            modtran = prep_retrieval(atmpath, modtran_output_file, spec_hu_file)
+            spec_hu_file = f"modtran_atmprofiles_{mo}.txt"  # Input profiles are always the same
+            rtm_output_file = f"{file_prefix}{mo}.bts+tau+dbtdsst.txt"
+            modtran = prep_retrieval(atmpath, rtm_output_file, spec_hu_file)
             modtran.to_csv(TCWV_input_file, index=False)
         
         # Remove rows with Surface T values of 271.46 and 271.461.
@@ -2129,21 +2171,33 @@ def concat_modtran_months(months,atmpath):
 
 ##########################
 
-def derive_coeffs(atmpath,simTOA_transformer,simWV_transformer,simT_transformer):
-    # Derive retrieval coefficiencts from MODTRAN files - 3 month rolling window
+def derive_coeffs(atmpath, simTOA_transformer, simWV_transformer, simT_transformer, rtm_backend=None):
+    """
+    Derive retrieval coefficients from RTM files using 3-month rolling window.
+
+    Parameters
+    ----------
+    atmpath : Path
+        Path to AtmCorrection data directory
+    simTOA_transformer, simWV_transformer, simT_transformer : sklearn transformers
+        Transformers for normalizing TOA, water vapor, and surface temperature
+    rtm_backend : str, optional
+        RTM backend to use ('modtran' or 'libradtran').
+        If None, uses the global RTM_BACKEND setting.
+    """
     months = ['01','02','03','04','05','06','07','08','09','10','11','12']
     atmcor = {}  # To store the regression results for each middle month.
-    
+
     # Loop over months by index so we can get the previous and next month via modulo arithmetic.
     for i, middle_month in enumerate(months):
         # Determine the rolling window months: previous, current, and next (with wrap-around)
         prev_month = months[(i - 1) % 12]
         next_month = months[(i + 1) % 12]
         window_months = [prev_month, middle_month, next_month]
-        
+
         print(f"Processing rolling window for middle month {middle_month}")
-        
-        modtran_lut,_ = concat_modtran_months(window_months,atmpath)
+
+        modtran_lut, _ = concat_modtran_months(window_months, atmpath, rtm_backend=rtm_backend)
     
         modtran_lut_norm = modtran_lut
     
